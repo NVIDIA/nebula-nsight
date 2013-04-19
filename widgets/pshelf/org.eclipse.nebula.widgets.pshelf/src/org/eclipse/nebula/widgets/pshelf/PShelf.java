@@ -9,6 +9,9 @@
 
 package org.eclipse.nebula.widgets.pshelf;
 
+import java.util.ArrayList;
+import java.util.Iterator;
+
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.SWTException;
 import org.eclipse.swt.events.DisposeEvent;
@@ -29,9 +32,6 @@ import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Event;
 import org.eclipse.swt.widgets.Listener;
 import org.eclipse.swt.widgets.TypedListener;
-
-import java.util.ArrayList;
-import java.util.Iterator;
 
 /**
  * <p>
@@ -58,7 +58,9 @@ import java.util.Iterator;
  * </p>
  */
 public class PShelf extends Canvas {
-	
+    private static final int SLIDE_DURATION = 150; // ms
+    private static final int FRAME_RATE = 75; // Actually, its 60 on TFTs. Let's honor CRTs!
+
 	private ArrayList items = new ArrayList();
 	private AbstractRenderer renderer;
 	private PShelfItem openItem;
@@ -352,8 +354,12 @@ public class PShelf extends Canvas {
 				items.add(0,item);
 			}
 			onResize();
+            postResize(previousOpen);
 		}
-		if (previousOpen != null)
+	}
+
+    private void postResize(PShelfItem previousOpen) {
+        if (previousOpen != null)
 			previousOpen.getBodyParent().setVisible(false);
 		
 		redraw();
@@ -366,124 +372,114 @@ public class PShelf extends Canvas {
         
         computeItemYCoordinates();
         onResize();
-	}
-	
-    private void animateOpenFromTop(PShelfItem previousItem, PShelfItem newItem)
-    {
-        double percentOfWork = 0;        
-                
-        while (percentOfWork < 1)
-        {            
-            yCoordinates.clear();
-            
-            int yTop = getClientArea().y;
-            
-            int yBottom = getClientArea().y + getClientArea().height - (itemHeight * (items.size() - (items.indexOf(previousItem) + 1)));
-            
-            int totalGrowingArea = getClientArea().height - (itemHeight * items.size());
-            
-            int growingSpace = (int)(totalGrowingArea * percentOfWork);
-            boolean addingGrowingSpace = false;
-            
-            for (int i = 0; i < items.size(); i++)
-            {
-                if (i <= items.indexOf(newItem))
-                {
-                    //put on top
-                    yCoordinates.add(new Integer(yTop));
-                    yTop += itemHeight;                    
-                }
-                else if (i > items.indexOf(previousItem))
-                {
-                    //put on bottom
-                    yCoordinates.add(new Integer(yBottom));
-                    yBottom += itemHeight;
-                }
-                else
-                {
-                    if (!addingGrowingSpace)
-                    {
-                        yTop += growingSpace;
-                        addingGrowingSpace = true;
-                    }
-                    yCoordinates.add(new Integer(yTop));
-                    yTop += itemHeight;                        
-                }
-                
-            }
-            
-            sizeClients();
-            redraw();
-            update();
-            //workaround for SWT bug 193357
-            if (SWT.getPlatform().equals("carbon"))
-            {
-            	getDisplay().readAndDispatch();
-            }
-            percentOfWork += .02;
-        } 
-        
-        computeItemYCoordinates();
-        redraw();
     }
-    
-    private void animateOpenFromBottom(PShelfItem previousItem, PShelfItem newItem)
+	
+    private void animateOpenFromTop(final PShelfItem previousItem, final PShelfItem newItem)
     {
-        double percentOfWork = 0;        
-                
-        while (percentOfWork < 1)
-        {            
-            yCoordinates.clear();
-            
-            int yTop = getClientArea().y;
-            
-            int yBottom = getClientArea().y + getClientArea().height - (itemHeight * (items.size() - (items.indexOf(newItem) + 1)));
-            
-            int totalShrinkingArea = getClientArea().height - (itemHeight * items.size());
-            
-            int collapsingSpace = (int)(totalShrinkingArea * (1 - percentOfWork));
-            boolean addedCollapsingSpace = false;
-            
-            for (int i = 0; i < items.size(); i++)
-            {
-                if (i <= items.indexOf(previousItem))
-                {
-                    //put on top
-                    yCoordinates.add(new Integer(yTop));
-                    yTop += itemHeight;                    
+        final long timestamp = System.currentTimeMillis();
+        getDisplay().timerExec(1000 / FRAME_RATE, new Runnable() {
+            public void run() {
+                if (openFromTop(System.currentTimeMillis() - timestamp, previousItem, newItem)) {
+                    getDisplay().timerExec(1000 / FRAME_RATE, this);
                 }
-                else if (i > items.indexOf(newItem))
-                {
-                    //put on bottom
-                    yCoordinates.add(new Integer(yBottom));
-                    yBottom += itemHeight;
-                }
-                else
-                {
-                    if (!addedCollapsingSpace)
-                    {
-                        yTop += collapsingSpace;
-                        addedCollapsingSpace = true;
-                    }
-                    yCoordinates.add(new Integer(yTop));
-                    yTop += itemHeight;                        
-                }
-                
             }
-            
-            sizeClients();
-            redraw(getClientArea().x,getClientArea().y, getClientArea().width, getClientArea().height, false);
-            update();
-            //workaround for SWT bug 193357
-            if (SWT.getPlatform().equals("carbon"))
-            {
-            	getDisplay().readAndDispatch();
+        });
+    }
+
+    protected boolean openFromTop(long elapsedTime, PShelfItem previousItem, PShelfItem newItem) {
+        yCoordinates.clear();
+
+        int yTop = getClientArea().y;
+
+        int yBottom = getClientArea().y + getClientArea().height - (itemHeight * (items.size() - (items.indexOf(previousItem) + 1)));
+
+        int totalGrowingArea = getClientArea().height - (itemHeight * items.size());
+
+        int growingSpace = totalGrowingArea * (Math.min(SLIDE_DURATION, (int) elapsedTime)) / SLIDE_DURATION;
+        boolean addingGrowingSpace = false;
+
+        for (int i = 0; i < items.size(); i++) {
+            if (i <= items.indexOf(newItem)) {
+                // put on top
+                yCoordinates.add(new Integer(yTop));
+                yTop += itemHeight;
+            } else if (i > items.indexOf(previousItem)) {
+                // put on bottom
+                yCoordinates.add(new Integer(yBottom));
+                yBottom += itemHeight;
+            } else {
+                if (!addingGrowingSpace) {
+                    yTop += growingSpace;
+                    addingGrowingSpace = true;
+                }
+                yCoordinates.add(new Integer(yTop));
+                yTop += itemHeight;
             }
-            percentOfWork += .02;
-        } 
-        
-        computeItemYCoordinates();
+
+        }
+
+        sizeClients();
         redraw();
+        if (elapsedTime > SLIDE_DURATION) {
+            postResize(previousItem);
+            return false;
+        } else {
+            return true;
+        }
+    }
+
+    private void animateOpenFromBottom(final PShelfItem previousItem, final PShelfItem newItem)
+    {
+        final long timestamp = System.currentTimeMillis();
+        getDisplay().timerExec(1000 / FRAME_RATE, new Runnable() {
+            public void run() {
+                if (openFromBottom(System.currentTimeMillis() - timestamp, previousItem, newItem)) {
+                    getDisplay().timerExec(1000 / FRAME_RATE, this);
+                }
+            }
+        });
+    }
+
+    protected boolean openFromBottom(long elapsedTime, PShelfItem previousItem, PShelfItem newItem) {
+        yCoordinates.clear();
+
+        int yTop = getClientArea().y;
+
+        int yBottom = getClientArea().y + getClientArea().height - (itemHeight * (items.size() - (items.indexOf(newItem) + 1)));
+
+        int totalShrinkingArea = getClientArea().height - (itemHeight * items.size());
+
+        int collapsingSpace = totalShrinkingArea * (SLIDE_DURATION - Math.min(SLIDE_DURATION, (int) elapsedTime)) / SLIDE_DURATION;
+        boolean addedCollapsingSpace = false;
+
+        for (int i = 0; i < items.size(); i++) {
+            if (i <= items.indexOf(previousItem)) {
+                // put on top
+                yCoordinates.add(new Integer(yTop));
+                yTop += itemHeight;
+            } else if (i > items.indexOf(newItem)) {
+                // put on bottom
+                yCoordinates.add(new Integer(yBottom));
+                yBottom += itemHeight;
+            } else {
+                if (!addedCollapsingSpace) {
+                    yTop += collapsingSpace;
+                    addedCollapsingSpace = true;
+                }
+                yCoordinates.add(new Integer(yTop));
+                yTop += itemHeight;
+            }
+
+        }
+
+        sizeClients();
+        redraw();
+        if (elapsedTime > SLIDE_DURATION) {
+            postResize(previousItem);
+            return false;
+        } else {
+            return true;
+        }
     }
 	
 	void onResize(){        
